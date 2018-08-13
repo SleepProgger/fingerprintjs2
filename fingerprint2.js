@@ -31,24 +31,58 @@
     }
 
     var defaultOptions = {
+
+/*
       swfContainerId: 'fingerprintjs2',
       swfPath: 'flash/compiled/FontList.swf',
       detectScreenOrientation: true,
+
       sortPluginsFor: [/palemoon/i],
       // To ensure consistent fingerprints when users rotate their mobile devices
-      userDefinedFonts: [],
-      // DNT depends on incognito mode for some browsers (Chrome) and it's impossible to detect incognito mode
       excludeDoNotTrack: true,
       // devicePixelRatio depends on browser zoom, and it's impossible to detect browser zoom
       excludePixelRatio: true,
       // On iOS 11, audio context can only be used in response to user interaction.
       // We require users to explicitly enable audio fingerprinting on iOS 11.
       // See https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
-      excludeAudioIOS11: true
+      excludeAudioIOS11: true,
+*/
+
+
+      flashFonts: {
+        containerId: 'fingerprintjs2',
+        swfPath: 'flash/compiled/FontList.swf'
+      },
+      jsFonts: {
+        userDefinedFonts: [],
+      },
+      resolution: {
+        // To ensure consistent fingerprints when users rotate their mobile devices
+        detectScreenOrientation: true
+      },
+      availableResolution: {
+        // To ensure consistent fingerprints when users rotate their mobile devices
+        detectScreenOrientation: true
+      },
+
+      plugins: {
+        sortPluginsFor: [/palemoon/i]
+      },
+      // DNT depends on incognito mode for some browsers (Chrome) and it's impossible to detect incognito mode
+      doNotTrack: false,
+      // devicePixelRatio depends on browser zoom, and it's impossible to detect browser zoom
+      pixelRatio: false,
+      audioFp: {
+        // On iOS 11, audio context can only be used in response to user interaction.
+        // We require users to explicitly enable audio fingerprinting on iOS 11.
+        // See https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
+        excludeIOS11: true
+      }
     }
-    this.options = this.extend(options, defaultOptions)
+    this.options = this.extendOptions(options, defaultOptions)
     this.nativeForEach = Array.prototype.forEach
     this.nativeMap = Array.prototype.map
+    console.log(this.options);
   }
   Fingerprint2.prototype = {
     extend: function (source, target) {
@@ -60,6 +94,22 @@
       }
       return target
     },
+    // "Deep merge" options for one level.
+    extendOptions: function (source, target) {
+      if (source == null) { return target }
+      for (var k in source) {
+        // If source[k] is true and k has default options keep the default options.
+        if (source[k] != null && !(source[k] === true && target[k])) {
+          if (typeof source[k] !== 'object' || Array.isArray(source[k]))
+            target[k] = source[k]
+          else
+            this.extend(source[k], target[k]);
+        }
+      }
+      return target
+    },
+
+
     get: function (done) {
       var that = this
       var keys = {
@@ -121,7 +171,7 @@
     },
     // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/enumerateDevices
     enumerateDevicesKey: function (keys, done) {
-      if (this.options.excludeEnumerateDevices || !this.isEnumerateDevicesSupported()) {
+      if (this.options.enumerateDevices === false || !this.isEnumerateDevicesSupported()) {
         return done(keys)
       }
 
@@ -131,7 +181,7 @@
         devices.forEach(function (device) {
           enumerateDevicesFp.push('id=' + device.deviceId + ';gid=' + device.groupId + ';' + device.kind + ';' + device.label)
         })
-        keys.addPreprocessedComponent({key: 'enumerate_devices', value: enumerateDevicesFp})
+        keys.addPreprocessedComponent({key: 'enumerateDevices', value: enumerateDevicesFp})
         return done(keys)
       })
       .catch(function (e) {
@@ -143,11 +193,11 @@
     },
     // Inspired by and based on https://github.com/cozylife/audio-fingerprint
     audioKey: function (keys, done) {
-      if (this.options.excludeAudio) {
+      if (this.options.audioFp === false) {
         return done(keys)
       }
 
-      if (this.options.excludeAudioIOS11 && navigator.userAgent.match(/OS 11.+Version\/11.+Safari/)) {
+      if (this.options.audioFp.excludeIOS11 && navigator.userAgent.match(/OS 11.+Version\/11.+Safari/)) {
         // See comment for excludeUserAgent and https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
         return done(keys)
       }
@@ -155,7 +205,7 @@
       var AudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext
 
       if (AudioContext == null) {
-        keys.addPreprocessedComponent({key: 'audio_fp', value: null})
+        keys.addPreprocessedComponent({key: 'audioFp', value: null})
         return done(keys)
       }
 
@@ -193,7 +243,7 @@
         oscillator.disconnect()
         compressor.disconnect()
 
-        keys.addPreprocessedComponent({key: 'audio_fp', value: fingerprint})
+        keys.addPreprocessedComponent({key: 'audioFp', value: fingerprint})
         return done(keys)
       }
 
@@ -210,8 +260,8 @@
       return keys
     },
     userAgentKey: function (keys) {
-      if (!this.options.excludeUserAgent) {
-        keys.addPreprocessedComponent({key: 'user_agent', value: this.getUserAgent()})
+      if (this.options.userAgent !== false) {
+        keys.addPreprocessedComponent({key: 'userAgent', value: this.getUserAgent()})
       }
       return keys
     },
@@ -220,21 +270,21 @@
       return navigator.userAgent
     },
     languageKey: function (keys) {
-      if (!this.options.excludeLanguage) {
+      if (this.options.language !== false) {
         // IE 9,10 on Windows 10 does not have the `navigator.language` property any longer
         keys.addPreprocessedComponent({key: 'language', value: navigator.language || navigator.userLanguage || navigator.browserLanguage || navigator.systemLanguage || ''})
       }
       return keys
     },
     colorDepthKey: function (keys) {
-      if (!this.options.excludeColorDepth) {
-        keys.addPreprocessedComponent({key: 'color_depth', value: window.screen.colorDepth || -1})
+      if (this.options.colorDepth !== false) {
+        keys.addPreprocessedComponent({key: 'colorDepth', value: window.screen.colorDepth || -1})
       }
       return keys
     },
     deviceMemoryKey: function (keys) {
-      if (!this.options.excludeDeviceMemory) {
-        keys.addPreprocessedComponent({key: 'device_memory', value: this.getDeviceMemory()})
+      if (this.options.deviceMemory !== false) {
+        keys.addPreprocessedComponent({key: 'deviceMemory', value: this.getDeviceMemory()})
       }
       return keys
     },
@@ -242,8 +292,8 @@
       return navigator.deviceMemory || -1
     },
     pixelRatioKey: function (keys) {
-      if (!this.options.excludePixelRatio) {
-        keys.addPreprocessedComponent({key: 'pixel_ratio', value: this.getPixelRatio()})
+      if (this.options.pixelRatio !== false) {
+        keys.addPreprocessedComponent({key: 'pixelRatio', value: this.getPixelRatio()})
       }
       return keys
     },
@@ -251,14 +301,14 @@
       return window.devicePixelRatio || ''
     },
     screenResolutionKey: function (keys) {
-      if (!this.options.excludeScreenResolution) {
+      if (this.options.resolution !== false) {
         return this.getScreenResolution(keys)
       }
       return keys
     },
     getScreenResolution: function (keys) {
       var resolution
-      if (this.options.detectScreenOrientation) {
+      if (this.options.resolution.detectScreenOrientation) {
         resolution = (window.screen.height > window.screen.width) ? [window.screen.height, window.screen.width] : [window.screen.width, window.screen.height]
       } else {
         resolution = [window.screen.width, window.screen.height]
@@ -267,7 +317,7 @@
       return keys
     },
     availableScreenResolutionKey: function (keys) {
-      if (!this.options.excludeAvailableScreenResolution) {
+      if (this.options.availableResolution !== false) {
         return this.getAvailableScreenResolution(keys)
       }
       return keys
@@ -282,18 +332,18 @@
         }
       }
       if (typeof available !== 'undefined') { // headless browsers
-        keys.addPreprocessedComponent({key: 'available_resolution', value: available})
+        keys.addPreprocessedComponent({key: 'availableResolution', value: available})
       }
       return keys
     },
     timezoneOffsetKey: function (keys) {
-      if (!this.options.excludeTimezoneOffset) {
-        keys.addPreprocessedComponent({key: 'timezone_offset', value: new Date().getTimezoneOffset()})
+      if (this.options.timezoneOffset !== false) {
+        keys.addPreprocessedComponent({key: 'timezoneOffset', value: new Date().getTimezoneOffset()}) // TODO: this isn't a good fingerprint. In areas with daylight saving it changes twice a year. Use fixed date or replace with tz hash
       }
       return keys
     },
     timezoneKey: function (keys) {
-      if (!this.options.excludeTimezone) {
+      if (this.options.timezone !== false) {
         var value = null
         if (window.Intl && window.Intl.DateTimeFormat) {
           value = new window.Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -303,111 +353,111 @@
       return keys
     },
     sessionStorageKey: function (keys) {
-      if (!this.options.excludeSessionStorage && this.hasSessionStorage()) {
-        keys.addPreprocessedComponent({key: 'session_storage', value: 1})
+      if (this.options.sessionStorage !== false && this.hasSessionStorage()) {
+        keys.addPreprocessedComponent({key: 'sessionStorage', value: 1})
       }
       return keys
     },
     localStorageKey: function (keys) {
-      if (!this.options.excludeSessionStorage && this.hasLocalStorage()) {
-        keys.addPreprocessedComponent({key: 'local_storage', value: 1})
+      if (this.options.localStorage !== false && this.hasLocalStorage()) {
+        keys.addPreprocessedComponent({key: 'localStorage', value: 1})
       }
       return keys
     },
     indexedDbKey: function (keys) {
-      if (!this.options.excludeIndexedDB && this.hasIndexedDB()) {
-        keys.addPreprocessedComponent({key: 'indexed_db', value: 1})
+      if (this.options.indexedDB !== false && this.hasIndexedDB()) {
+        keys.addPreprocessedComponent({key: 'indexedDb', value: 1})
       }
       return keys
     },
     addBehaviorKey: function (keys) {
       // body might not be defined at this point or removed programmatically
-      if (!this.options.excludeAddBehavior && document.body && document.body.addBehavior) {
-        keys.addPreprocessedComponent({key: 'add_behavior', value: 1})
+      if (this.options.addBehavior !== false && document.body && document.body.addBehavior) {
+        keys.addPreprocessedComponent({key: 'addBehavior', value: 1})
       }
       return keys
     },
     openDatabaseKey: function (keys) {
-      if (!this.options.excludeOpenDatabase && window.openDatabase) {
-        keys.addPreprocessedComponent({key: 'open_database', value: 1})
+      if (this.options.openDatabase !== false && window.openDatabase) {
+        keys.addPreprocessedComponent({key: 'openDatabase', value: 1})
       }
       return keys
     },
     cpuClassKey: function (keys) {
-      if (!this.options.excludeCpuClass) {
-        keys.addPreprocessedComponent({key: 'cpu_class', value: this.getNavigatorCpuClass()})
+      if (this.options.cpuClass !== false) {
+        keys.addPreprocessedComponent({key: 'cpuClass', value: this.getNavigatorCpuClass()})
       }
       return keys
     },
     platformKey: function (keys) {
-      if (!this.options.excludePlatform) {
-        keys.addPreprocessedComponent({key: 'navigator_platform', value: this.getNavigatorPlatform()})
+      if (this.options.platform !== false) {
+        keys.addPreprocessedComponent({key: 'platform', value: this.getNavigatorPlatform()})
       }
       return keys
     },
     doNotTrackKey: function (keys) {
-      if (!this.options.excludeDoNotTrack) {
-        keys.addPreprocessedComponent({key: 'do_not_track', value: this.getDoNotTrack()})
+      if (this.options.doNotTrack !== false) {
+        keys.addPreprocessedComponent({key: 'doNotTrack', value: this.getDoNotTrack()})
       }
       return keys
     },
     canvasKey: function (keys) {
-      if (!this.options.excludeCanvas && this.isCanvasSupported()) {
+      if (this.options.canvas !== false && this.isCanvasSupported()) {
         keys.addPreprocessedComponent({key: 'canvas', value: this.getCanvasFp()})
       }
       return keys
     },
     webglKey: function (keys) {
-      if (!this.options.excludeWebGL && this.isWebGlSupported()) {
-        keys.addPreprocessedComponent({key: 'webgl', value: this.getWebglFp()})
+      if (this.options.webGL !== false && this.isWebGlSupported()) {
+        keys.addPreprocessedComponent({key: 'webGL', value: this.getWebglFp()})
       }
       return keys
     },
     webglVendorAndRendererKey: function (keys) {
-      if (!this.options.excludeWebGLVendorAndRenderer && this.isWebGlSupported()) {
-        keys.addPreprocessedComponent({key: 'webgl_vendor', value: this.getWebglVendorAndRenderer()})
+      if (this.options.webGLVendor !== false && this.isWebGlSupported()) {
+        keys.addPreprocessedComponent({key: 'webglVendor', value: this.getWebglVendorAndRenderer()})
       }
       return keys
     },
     adBlockKey: function (keys) {
-      if (!this.options.excludeAdBlock) {
+      if (this.options.adBlock !== false) {
         keys.addPreprocessedComponent({key: 'adblock', value: this.getAdBlock()})
       }
       return keys
     },
     hasLiedLanguagesKey: function (keys) {
-      if (!this.options.excludeHasLiedLanguages) {
-        keys.addPreprocessedComponent({key: 'has_lied_languages', value: this.getHasLiedLanguages()})
+      if (this.options.hasLiedLanguages !== false) {
+        keys.addPreprocessedComponent({key: 'hasLiedLanguages', value: this.getHasLiedLanguages()})
       }
       return keys
     },
     hasLiedResolutionKey: function (keys) {
-      if (!this.options.excludeHasLiedResolution) {
-        keys.addPreprocessedComponent({key: 'has_lied_resolution', value: this.getHasLiedResolution()})
+      if (this.options.hasLiedResolution !== false) {
+        keys.addPreprocessedComponent({key: 'hasLiedResolution', value: this.getHasLiedResolution()})
       }
       return keys
     },
     hasLiedOsKey: function (keys) {
-      if (!this.options.excludeHasLiedOs) {
-        keys.addPreprocessedComponent({key: 'has_lied_os', value: this.getHasLiedOs()})
+      if (this.options.hasLiedOs !== false) {
+        keys.addPreprocessedComponent({key: 'hasLiedOs', value: this.getHasLiedOs()})
       }
       return keys
     },
     hasLiedBrowserKey: function (keys) {
-      if (!this.options.excludeHasLiedBrowser) {
-        keys.addPreprocessedComponent({key: 'has_lied_browser', value: this.getHasLiedBrowser()})
+      if (this.options.hasLiedBrowser !== false) {
+        keys.addPreprocessedComponent({key: 'hasLiedBrowser', value: this.getHasLiedBrowser()})
       }
       return keys
     },
     fontsKey: function (keys, done) {
-      if (this.options.excludeJsFonts) {
+      if (this.options.jsFonts === false) {
         return this.flashFontsKey(keys, done)
       }
       return this.jsFontsKey(keys, done)
     },
     // flash fonts (will increase fingerprinting time 20X to ~ 130-150ms)
     flashFontsKey: function (keys, done) {
-      if (this.options.excludeFlashFonts) {
+      if (this.options.flashFonts === false) {
         return done(keys)
       }
       // we do flash if swfobject is loaded
@@ -421,7 +471,7 @@
         return done(keys)
       }
       this.loadSwfAndDetectFonts(function (fonts) {
-        keys.addPreprocessedComponent({key: 'swf_fonts', value: fonts.join(';')})
+        keys.addPreprocessedComponent({key: 'flashFonts', value: fonts.join(';')})
         done(keys)
       })
     },
@@ -616,18 +666,19 @@
         h.removeChild(fontsDiv)
         h.removeChild(baseFontsDiv)
 
-        keys.addPreprocessedComponent({key: 'js_fonts', value: available})
+        keys.addPreprocessedComponent({key: 'jsFonts', value: available})
         done(keys)
       }, 1)
     },
+  // TODO:
     pluginsKey: function (keys) {
-      if (!this.options.excludePlugins) {
+      if (this.options.plugins !== false) {
         if (this.isIE()) {
-          if (!this.options.excludeIEPlugins) {
-            keys.addPreprocessedComponent({key: 'ie_plugins', value: this.getIEPlugins()})
+          if (this.options.IEPlugins !== false) {
+            keys.addPreprocessedComponent({key: 'iePlugins', value: this.getIEPlugins()})
           }
         } else {
-          keys.addPreprocessedComponent({key: 'regular_plugins', value: this.getRegularPlugins()})
+          keys.addPreprocessedComponent({key: 'regularPlugins', value: this.getRegularPlugins()})
         }
       }
       return keys
@@ -699,10 +750,11 @@
       }
       return result
     },
+    // TODO: behaviour depends on the merge of ie_plugins and regular_plugins
     pluginsShouldBeSorted: function () {
       var should = false
-      for (var i = 0, l = this.options.sortPluginsFor.length; i < l; i++) {
-        var re = this.options.sortPluginsFor[i]
+      for (var i = 0, l = this.options.plugins.sortPluginsFor.length; i < l; i++) {
+        var re = this.options.plugins.sortPluginsFor[i]
         if (navigator.userAgent.match(re)) {
           should = true
           break
@@ -711,14 +763,14 @@
       return should
     },
     touchSupportKey: function (keys) {
-      if (!this.options.excludeTouchSupport) {
-        keys.addPreprocessedComponent({key: 'touch_support', value: this.getTouchSupport()})
+      if (this.options.touchSupport !== false) {
+        keys.addPreprocessedComponent({key: 'touchSupport', value: this.getTouchSupport()})
       }
       return keys
     },
     hardwareConcurrencyKey: function (keys) {
-      if (!this.options.excludeHardwareConcurrency) {
-        keys.addPreprocessedComponent({key: 'hardware_concurrency', value: this.getHardwareConcurrency()})
+      if (this.options.hardwareConcurrency !== false) {
+        keys.addPreprocessedComponent({key: 'hardwareConcurrency', value: this.getHardwareConcurrency()})
       }
       return keys
     },
