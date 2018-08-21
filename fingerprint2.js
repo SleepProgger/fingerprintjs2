@@ -30,7 +30,402 @@
       return new Fingerprint2(options)
     }
 
+    this.UNSUPPORTED = {type: 'UNSUPPORTED'}
+    this.EXCLUDED = {type: 'EXCLUDED'}
+
     var defaultOptions = {
+      components: {
+        audio: {
+          // On iOS 11, audio context can only be used in response to user interaction.
+          // We require users to explicitly enable audio fingerprinting on iOS 11.
+          // See https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
+          excludeIOS11: true
+        },
+        availableResolution: {
+          detectScreenOrientation: true
+        }
+      }
+    }
+
+    this.components = {
+      adblock: function () {
+        var ads = document.createElement('div')
+        ads.innerHTML = '&nbsp;'
+        ads.className = 'adsbox'
+        var result = false
+        try {
+          // body may not exist, that's why we need try/catch
+          document.body.appendChild(ads)
+          result = document.getElementsByClassName('adsbox')[0].offsetHeight === 0
+          document.body.removeChild(ads)
+        } catch (e) {
+          result = false
+        }
+        return result
+      },
+
+      addBehavior: function () {
+        // body might not be defined at this point or removed programmatically
+        // TODO: we can check if the addBehavior method is available without assuming document.body is available, right ?
+        // something like '!!document.createElement("div").addBehavior' or even !!HTMLElement.prototype.addBehavior ?
+        if (document.body && document.body.addBehavior) {
+          return 1
+        }
+        // TODO: How do we want to handle unsupported by browser in this cases ?
+        // I mean all this component does is a feature test (supported ? yes/no)...
+        // previously this function only returned an value at all if the function (and body) was available.
+        return 0
+      },
+
+      availableResolution: function (options) {
+        var available
+        if (window.screen.availWidth && window.screen.availHeight) {
+          if (options.detectScreenOrientation) {
+            available = (window.screen.availHeight > window.screen.availWidth) ? [window.screen.availHeight, window.screen.availWidth] : [window.screen.availWidth, window.screen.availHeight]
+          } else {
+            available = [window.screen.availHeight, window.screen.availWidth]
+          }
+        }
+        if (typeof available !== 'undefined') { // headless browsers
+          return available
+        }
+        return this.UNSUPPORTED
+      },
+
+      // https://www.browserleaks.com/canvas#how-does-it-work
+      canvas: function (options) {
+        if (!this.isCanvasSupported()) {
+          return this.UNSUPPORTED
+        }
+        var result = []
+        // Very simple now, need to make it more complex (geo shapes etc)
+        var canvas = document.createElement('canvas')
+        canvas.width = 2000
+        canvas.height = 200
+        canvas.style.display = 'inline'
+        var ctx = canvas.getContext('2d')
+        // detect browser support of canvas winding
+        // http://blogs.adobe.com/webplatform/2013/01/30/winding-rules-in-canvas/
+        // https://github.com/Modernizr/Modernizr/blob/master/feature-detects/canvas/winding.js
+        ctx.rect(0, 0, 10, 10)
+        ctx.rect(2, 2, 6, 6)
+        result.push('canvas winding:' + ((ctx.isPointInPath(5, 5, 'evenodd') === false) ? 'yes' : 'no'))
+
+        ctx.textBaseline = 'alphabetic'
+        ctx.fillStyle = '#f60'
+        ctx.fillRect(125, 1, 62, 20)
+        ctx.fillStyle = '#069'
+        // https://github.com/Valve/fingerprintjs2/issues/66
+        if (options.dontUseFakeFontInCanvas) {
+          ctx.font = '11pt Arial'
+        } else {
+          ctx.font = '11pt no-real-font-123'
+        }
+        ctx.fillText('Cwm fjordbank glyphs vext quiz, \ud83d\ude03', 2, 15)
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.2)'
+        ctx.font = '18pt Arial'
+        ctx.fillText('Cwm fjordbank glyphs vext quiz, \ud83d\ude03', 4, 45)
+
+        // canvas blending
+        // http://blogs.adobe.com/webplatform/2013/01/28/blending-features-in-canvas/
+        // http://jsfiddle.net/NDYV8/16/
+        ctx.globalCompositeOperation = 'multiply'
+        ctx.fillStyle = 'rgb(255,0,255)'
+        ctx.beginPath()
+        ctx.arc(50, 50, 50, 0, Math.PI * 2, true)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = 'rgb(0,255,255)'
+        ctx.beginPath()
+        ctx.arc(100, 50, 50, 0, Math.PI * 2, true)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = 'rgb(255,255,0)'
+        ctx.beginPath()
+        ctx.arc(75, 100, 50, 0, Math.PI * 2, true)
+        ctx.closePath()
+        ctx.fill()
+        ctx.fillStyle = 'rgb(255,0,255)'
+        // canvas winding
+        // http://blogs.adobe.com/webplatform/2013/01/30/winding-rules-in-canvas/
+        // http://jsfiddle.net/NDYV8/19/
+        ctx.arc(75, 75, 75, 0, Math.PI * 2, true)
+        ctx.arc(75, 75, 25, 0, Math.PI * 2, true)
+        ctx.fill('evenodd')
+
+        if (canvas.toDataURL) { result.push('canvas fp:' + canvas.toDataURL()) }
+        return result.join('~')
+      },
+
+      colorDepth: function (options) {
+        return window.screen.colorDepth || -1
+      },
+
+      cpuClass: function (options) {
+        if (navigator.cpuClass) {
+          return navigator.cpuClass
+        }
+        return 'unknown' // TODO: this.UNSUPPORTED ?
+      },
+
+      deviceMemory: function (options) {
+        return navigator.deviceMemory || -1 // TODO: || this.UNSUPPORTED ?
+      },
+
+      doNotTrack: function (options) {
+        if (navigator.doNotTrack) {
+          return navigator.doNotTrack
+        } else if (navigator.msDoNotTrack) {
+          return navigator.msDoNotTrack
+        } else if (window.doNotTrack) {
+          return window.doNotTrack
+        } else {
+          return 'unknown' // TODO: this.UNSUPPORTED ?
+        }
+      },
+
+      hardwareConcurrency: function (options) {
+        if (navigator.hardwareConcurrency) {
+          return navigator.hardwareConcurrency
+        }
+        return 'unknown' // TODO: this.UNSUPPORTED ?
+      },
+
+      hasIndexedDB: function (options) {
+        try {
+          return !!window.indexedDB
+        } catch (e) {
+          return true // SecurityError when referencing it means it exists
+        }
+      },
+
+      hasLiedBrowser: function(options){
+        var userAgent = navigator.userAgent.toLowerCase()
+        var productSub = navigator.productSub
+
+        // we extract the browser from the user agent (respect the order of the tests)
+        var browser
+        if (userAgent.indexOf('firefox') >= 0) {
+          browser = 'Firefox'
+        } else if (userAgent.indexOf('opera') >= 0 || userAgent.indexOf('opr') >= 0) {
+          browser = 'Opera'
+        } else if (userAgent.indexOf('chrome') >= 0) {
+          browser = 'Chrome'
+        } else if (userAgent.indexOf('safari') >= 0) {
+          browser = 'Safari'
+        } else if (userAgent.indexOf('trident') >= 0) {
+          browser = 'Internet Explorer'
+        } else {
+          browser = 'Other'
+        }
+
+        if ((browser === 'Chrome' || browser === 'Safari' || browser === 'Opera') && productSub !== '20030107') {
+          return true
+        }
+
+        // eslint-disable-next-line no-eval
+        var tempRes = eval.toString().length
+        if (tempRes === 37 && browser !== 'Safari' && browser !== 'Firefox' && browser !== 'Other') {
+          return true
+        } else if (tempRes === 39 && browser !== 'Internet Explorer' && browser !== 'Other') {
+          return true
+        } else if (tempRes === 33 && browser !== 'Chrome' && browser !== 'Opera' && browser !== 'Other') {
+          return true
+        }
+
+        // We create an error to see how it is handled
+        var errFirefox
+        try {
+          // eslint-disable-next-line no-throw-literal
+          throw 'a'
+        } catch (err) {
+          try {
+            err.toSource()
+            errFirefox = true
+          } catch (errOfErr) {
+            errFirefox = false
+          }
+        }
+        if (errFirefox && browser !== 'Firefox' && browser !== 'Other') {
+          return true
+        }
+        return false
+      },
+
+      hasLiedLanguages: function(options){
+        // We check if navigator.language is equal to the first language of navigator.languages
+        if (typeof navigator.languages !== 'undefined') {
+          try {
+            var firstLanguages = navigator.languages[0].substr(0, 2)
+            if (firstLanguages !== navigator.language.substr(0, 2)) {
+              return true
+            }
+          } catch (err) {
+            return true
+          }
+        }
+        return false        
+      },
+
+      hasLiedOs: function(options){
+        var userAgent = navigator.userAgent.toLowerCase()
+        var oscpu = navigator.oscpu
+        var platform = navigator.platform.toLowerCase()
+        var os
+        // We extract the OS from the user agent (respect the order of the if else if statement)
+        if (userAgent.indexOf('windows phone') >= 0) {
+          os = 'Windows Phone'
+        } else if (userAgent.indexOf('win') >= 0) {
+          os = 'Windows'
+        } else if (userAgent.indexOf('android') >= 0) {
+          os = 'Android'
+        } else if (userAgent.indexOf('linux') >= 0) {
+          os = 'Linux'
+        } else if (userAgent.indexOf('iphone') >= 0 || userAgent.indexOf('ipad') >= 0) {
+          os = 'iOS'
+        } else if (userAgent.indexOf('mac') >= 0) {
+          os = 'Mac'
+        } else {
+          os = 'Other'
+        }
+        // We detect if the person uses a mobile device
+        var mobileDevice
+        if (('ontouchstart' in window) ||
+             (navigator.maxTouchPoints > 0) ||
+             (navigator.msMaxTouchPoints > 0)) {
+          mobileDevice = true
+        } else {
+          mobileDevice = false
+        }
+
+        if (mobileDevice && os !== 'Windows Phone' && os !== 'Android' && os !== 'iOS' && os !== 'Other') {
+          return true
+        }
+
+        // We compare oscpu with the OS extracted from the UA
+        if (typeof oscpu !== 'undefined') {
+          oscpu = oscpu.toLowerCase()
+          if (oscpu.indexOf('win') >= 0 && os !== 'Windows' && os !== 'Windows Phone') {
+            return true
+          } else if (oscpu.indexOf('linux') >= 0 && os !== 'Linux' && os !== 'Android') {
+            return true
+          } else if (oscpu.indexOf('mac') >= 0 && os !== 'Mac' && os !== 'iOS') {
+            return true
+          } else if ((oscpu.indexOf('win') === -1 && oscpu.indexOf('linux') === -1 && oscpu.indexOf('mac') === -1) !== (os === 'Other')) {
+            return true
+          }
+        }
+
+        // We compare platform with the OS extracted from the UA
+        if (platform.indexOf('win') >= 0 && os !== 'Windows' && os !== 'Windows Phone') {
+          return true
+        } else if ((platform.indexOf('linux') >= 0 || platform.indexOf('android') >= 0 || platform.indexOf('pike') >= 0) && os !== 'Linux' && os !== 'Android') {
+          return true
+        } else if ((platform.indexOf('mac') >= 0 || platform.indexOf('ipad') >= 0 || platform.indexOf('ipod') >= 0 || platform.indexOf('iphone') >= 0) && os !== 'Mac' && os !== 'iOS') {
+          return true
+        } else if ((platform.indexOf('win') === -1 && platform.indexOf('linux') === -1 && platform.indexOf('mac') === -1) !== (os === 'Other')) {
+          return true
+        }
+
+        if (typeof navigator.plugins === 'undefined' && os !== 'Windows' && os !== 'Windows Phone') {
+          // We are are in the case where the person uses ie, therefore we can infer that it's windows
+          return true
+        }
+
+        return false        
+      },
+
+      hasLiedResolution: function(options){
+        if (window.screen.width < window.screen.availWidth) {
+          return true
+        }
+        if (window.screen.height < window.screen.availHeight) {
+          return true
+        }
+        return false        
+      },
+      
+
+    }
+
+    this.asyncComponents = {
+      // Inspired by and based on https://github.com/cozylife/audio-fingerprint
+      audio: function (options, done) {
+        if (options.excludeIOS11 && navigator.userAgent.match(/OS 11.+Version\/11.+Safari/)) {
+          // See comment for excludeUserAgent and https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
+          return done(this.EXCLUDED)
+        }
+        var AudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext
+        if (AudioContext == null) {
+          return done(this.UNSUPPORTED)
+        }
+        var context = new AudioContext(1, 44100, 44100)
+        var oscillator = context.createOscillator()
+        oscillator.type = 'triangle'
+        oscillator.frequency.setValueAtTime(10000, context.currentTime)
+        var compressor = context.createDynamicsCompressor()
+        this.each([
+          ['threshold', -50],
+          ['knee', 40],
+          ['ratio', 12],
+          ['reduction', -20],
+          ['attack', 0],
+          ['release', 0.25]
+        ], function (item) {
+          if (compressor[item[0]] !== undefined && typeof compressor[item[0]].setValueAtTime === 'function') {
+            compressor[item[0]].setValueAtTime(item[1], context.currentTime)
+          }
+        })
+        var oncompleteTimeout = setTimeout(function () {
+          console.warn('Audio fingerprint timed out. Please report bug at https://github.com/Valve/fingerprintjs2 with your user agent: "' + navigator.userAgent + '".')
+          return done(null) // TODO what to return here ? Raise exception ? Add a special this.ERROR ?
+        }, 1000)
+        context.oncomplete = function (event) {
+          clearTimeout(oncompleteTimeout)
+          var fingerprint = event.renderedBuffer.getChannelData(0)
+                       .slice(4500, 5000)
+                       .reduce(function (acc, val) { return acc + Math.abs(val) }, 0)
+                       .toString()
+          oscillator.disconnect()
+          compressor.disconnect()
+          return done(fingerprint)
+        }
+        oscillator.connect(compressor)
+        compressor.connect(context.destination)
+        oscillator.start(0)
+        context.startRendering()
+      },
+
+      // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/enumerateDevices
+      // TODO: or just devices instead of enumerateDevices ?
+      enumeratedDevices: function (options, done) {
+        var that = this;
+        if (!this.isEnumerateDevicesSupported()) {
+          return done(this.UNSUPPORTED)
+        }
+        navigator.mediaDevices.enumerateDevices()
+        .then(function (devices) {
+          var enumerateDevicesFp = []
+          devices.forEach(function (device) {
+            enumerateDevicesFp.push('id=' + device.deviceId + ';gid=' + device.groupId + ';' + device.kind + ';' + device.label)
+          })
+          return done(enumerateDevicesFp)
+        })
+        .catch(function (e) {
+          return done(that.UNSUPPORTED) // or error ? At least we should log it, no ?
+        })
+      },
+
+      fonts: function (options, done) {
+        if (options.excludeJsFonts) { // TODO: rename option ?
+          return this.getFlashFonts(options, done)
+        }
+        return this.getJsFonts(options, done)
+      },
+    
+    }
+
+    var defaultOptions_ = {
       swfContainerId: 'fingerprintjs2',
       swfPath: 'flash/compiled/FontList.swf',
       detectScreenOrientation: true,
@@ -46,10 +441,12 @@
       // See https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
       excludeAudioIOS11: true
     }
-    this.options = this.extend(options, defaultOptions)
+    this.options = this.extendOptions(options, defaultOptions)
     this.nativeForEach = Array.prototype.forEach
     this.nativeMap = Array.prototype.map
+    console.log('options', this.options)
   }
+
   Fingerprint2.prototype = {
     extend: function (source, target) {
       if (source == null) { return target }
@@ -60,148 +457,117 @@
       }
       return target
     },
-    get: function (done) {
-      var that = this
-      var keys = {
-        data: [],
-        addPreprocessedComponent: function (pair) {
-          var componentValue = pair.value
-          if (typeof that.options.preprocessor === 'function') {
-            componentValue = that.options.preprocessor(pair.key, componentValue)
-          }
-          keys.data.push({key: pair.key, value: componentValue})
+    extendOptions: function (userOptions, defaultOptions) {
+      if (userOptions == null) { return defaultOptions }
+      // simple extend for every global option
+      var userCompOptions = userOptions.components
+      userOptions = this.extend(userOptions, {}) // shallow clone
+      userOptions['components'] = null
+      defaultOptions = this.extend(userOptions, defaultOptions)
+      // and an one level "deep" merge for component options
+      // TODO: we could simply use a real deep merge algo here, but then we still need to handle the
+      //   components[foo] = false and components[foo] = true shortcuts for ... components[foo] = { enabled: bar }
+      for (var k in userCompOptions) {
+        var option = userCompOptions[k]
+        if (option === true || !option) {
+          option = { disabled: !option }
+        }
+        if (defaultOptions.components[k]) {
+          this.extend(option, defaultOptions.components[k])
+        } else {
+          defaultOptions.components[k] = option
         }
       }
-      keys = this.userAgentKey(keys)
-      keys = this.languageKey(keys)
-      keys = this.colorDepthKey(keys)
-      keys = this.deviceMemoryKey(keys)
-      keys = this.pixelRatioKey(keys)
-      keys = this.hardwareConcurrencyKey(keys)
-      keys = this.screenResolutionKey(keys)
-      keys = this.availableScreenResolutionKey(keys)
-      keys = this.timezoneOffsetKey(keys)
-      keys = this.timezoneKey(keys)
-      keys = this.sessionStorageKey(keys)
-      keys = this.localStorageKey(keys)
-      keys = this.indexedDbKey(keys)
-      keys = this.addBehaviorKey(keys)
-      keys = this.openDatabaseKey(keys)
-      keys = this.cpuClassKey(keys)
-      keys = this.platformKey(keys)
-      keys = this.doNotTrackKey(keys)
-      keys = this.pluginsKey(keys)
-      keys = this.canvasKey(keys)
-      keys = this.webglKey(keys)
-      keys = this.webglVendorAndRendererKey(keys)
-      keys = this.adBlockKey(keys)
-      keys = this.hasLiedLanguagesKey(keys)
-      keys = this.hasLiedResolutionKey(keys)
-      keys = this.hasLiedOsKey(keys)
-      keys = this.hasLiedBrowserKey(keys)
-      keys = this.touchSupportKey(keys)
-      keys = this.customEntropyFunction(keys)
-      this.fontsKey(keys, function (keysWithFont) {
-        that.audioKey(keysWithFont, function (newKeys) {
-          that.enumerateDevicesKey(newKeys, function (keysWithDevices) {
-            var values = []
-            that.each(keysWithDevices.data, function (pair) {
-              var value = pair.value
-              if (value && typeof value.join === 'function') {
-                values.push(value.join(';'))
-              } else {
-                values.push(value)
-              }
-            })
-            var murmur = that.x64hash128(values.join('~~~'), 31)
-            return done(murmur, keysWithDevices.data)
-          })
-        })
-      })
+      return defaultOptions
     },
-    // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/enumerateDevices
-    enumerateDevicesKey: function (keys, done) {
-      if (this.options.excludeEnumerateDevices || !this.isEnumerateDevicesSupported()) {
-        return done(keys)
-      }
 
-      navigator.mediaDevices.enumerateDevices()
-      .then(function (devices) {
-        var enumerateDevicesFp = []
-        devices.forEach(function (device) {
-          enumerateDevicesFp.push('id=' + device.deviceId + ';gid=' + device.groupId + ';' + device.kind + ';' + device.label)
-        })
-        keys.addPreprocessedComponent({key: 'enumerate_devices', value: enumerateDevicesFp})
-        return done(keys)
-      })
-      .catch(function (e) {
-        return done(keys)
-      })
+    get: function (done) {
+      var values = []
+      var that = this
+      var addPreprocessedComponent = function (key, value) {
+        if (typeof that.options.preprocessor === 'function') {
+          value = that.options.preprocessor(k, value)
+        }
+        if (value === that.UNSUPPORTED || value === that.EXCLUDED) { // TODO: add option to also return UNSUPPORTED values ?
+          return
+        }
+        values.push({key: key, value: value})
+      }
+      
+      var componentOptions = this.options.components
+      for (var k in this.components) {
+        var options = componentOptions[k]
+        if (options && options.disabled) {
+          continue
+        }
+        var value = this.components[k].call(this, options || {})
+        addPreprocessedComponent(k, value)
+      }
+      
+      // Collect non exluded asynchrone components
+      var compsToRun = []
+      for (var k in this.asyncComponents){
+        var options = componentOptions[k]
+        if (options && options.disabled){
+          continue
+        }
+        compsToRun.push([k, this.asyncComponents[k], options || {}])
+      }
+      var asyncComponentRemain = compsToRun.length
+      if (asyncComponentRemain === 0){
+        return done(this.hashComponents(values), values)
+      }
+      // .. and run them them all at once
+      // TODO: the old code executes one async component at a time.
+      //   We could do the same here with a simple job queue, but i am not sure if it is needed ?
+      var asyncCallback = function (k, v) {
+        addPreprocessedComponent(k, v)
+        asyncComponentRemain -= 1
+        if (asyncComponentRemain === 0){
+          done(this.hashComponents(values), values)
+        }
+      }
+      for (var i = 0; i < compsToRun.length; ++i ){
+        var func = compsToRun[i][1]
+        var options = compsToRun[i][2]
+        var key = compsToRun[i][0]
+        func.call(this, options, asyncCallback.bind(this, key) )
+      }
     },
+    
+    hashComponents: function(components, noSort){
+      // sort by key to keep the hash stable
+      // This alters the components argument.
+      if (!noSort){
+        components.sort(function compare(a,b) {
+          if (a.key < b.key) {
+            return -1
+          }
+          if (a.key > b.key) {            
+            return 1
+          }
+          return 0
+        });        
+      }
+      var values = []
+      this.each(components, function (pair) {
+        var value = pair.value
+        if (value && typeof value.join === 'function') {
+          values.push(value.join(';'))
+        } else {
+          values.push(value)
+        }
+      })
+      var murmur = this.x64hash128(values.join('~~~'), 31)
+      return murmur
+    },
+
+  
     isEnumerateDevicesSupported: function () {
       return (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)
     },
-    // Inspired by and based on https://github.com/cozylife/audio-fingerprint
-    audioKey: function (keys, done) {
-      if (this.options.excludeAudio) {
-        return done(keys)
-      }
-
-      if (this.options.excludeAudioIOS11 && navigator.userAgent.match(/OS 11.+Version\/11.+Safari/)) {
-        // See comment for excludeUserAgent and https://stackoverflow.com/questions/46363048/onaudioprocess-not-called-on-ios11#46534088
-        return done(keys)
-      }
-
-      var AudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext
-
-      if (AudioContext == null) {
-        keys.addPreprocessedComponent({key: 'audio_fp', value: null})
-        return done(keys)
-      }
-
-      var context = new AudioContext(1, 44100, 44100)
-
-      var oscillator = context.createOscillator()
-      oscillator.type = 'triangle'
-      oscillator.frequency.setValueAtTime(10000, context.currentTime)
-
-      var compressor = context.createDynamicsCompressor()
-      this.each([
-        ['threshold', -50],
-        ['knee', 40],
-        ['ratio', 12],
-        ['reduction', -20],
-        ['attack', 0],
-        ['release', 0.25]
-      ], function (item) {
-        if (compressor[item[0]] !== undefined && typeof compressor[item[0]].setValueAtTime === 'function') {
-          compressor[item[0]].setValueAtTime(item[1], context.currentTime)
-        }
-      })
-
-      var oncompleteTimeout = setTimeout(function () {
-        console.warn('Audio fingerprint timed out. Please report bug at https://github.com/Valve/fingerprintjs2 with your user agent: "' + navigator.userAgent + '".')
-        return done(keys)
-      }, 1000)
-
-      context.oncomplete = function (event) {
-        clearTimeout(oncompleteTimeout)
-        var fingerprint = event.renderedBuffer.getChannelData(0)
-                     .slice(4500, 5000)
-                     .reduce(function (acc, val) { return acc + Math.abs(val) }, 0)
-                     .toString()
-        oscillator.disconnect()
-        compressor.disconnect()
-
-        keys.addPreprocessedComponent({key: 'audio_fp', value: fingerprint})
-        return done(keys)
-      }
-
-      oscillator.connect(compressor)
-      compressor.connect(context.destination)
-      oscillator.start(0)
-      context.startRendering()
-    },
+    // TODO: can be removed, as fp.components['custom'] = someFunction does essential the same.
+    //  It might be a good idea to add a simlpe utils function for that tho ?
     customEntropyFunction: function (keys) {
       if (typeof this.options.customFunction === 'function') {
         var customKey = typeof this.options.customKey === 'string' ? this.options.customKey : 'custom'
@@ -209,6 +575,7 @@
       }
       return keys
     },
+
     userAgentKey: function (keys) {
       if (!this.options.excludeUserAgent) {
         keys.addPreprocessedComponent({key: 'user_agent', value: this.getUserAgent()})
@@ -225,21 +592,6 @@
         keys.addPreprocessedComponent({key: 'language', value: navigator.language || navigator.userLanguage || navigator.browserLanguage || navigator.systemLanguage || ''})
       }
       return keys
-    },
-    colorDepthKey: function (keys) {
-      if (!this.options.excludeColorDepth) {
-        keys.addPreprocessedComponent({key: 'color_depth', value: window.screen.colorDepth || -1})
-      }
-      return keys
-    },
-    deviceMemoryKey: function (keys) {
-      if (!this.options.excludeDeviceMemory) {
-        keys.addPreprocessedComponent({key: 'device_memory', value: this.getDeviceMemory()})
-      }
-      return keys
-    },
-    getDeviceMemory: function () {
-      return navigator.deviceMemory || -1
     },
     pixelRatioKey: function (keys) {
       if (!this.options.excludePixelRatio) {
@@ -264,26 +616,6 @@
         resolution = [window.screen.width, window.screen.height]
       }
       keys.addPreprocessedComponent({key: 'resolution', value: resolution})
-      return keys
-    },
-    availableScreenResolutionKey: function (keys) {
-      if (!this.options.excludeAvailableScreenResolution) {
-        return this.getAvailableScreenResolution(keys)
-      }
-      return keys
-    },
-    getAvailableScreenResolution: function (keys) {
-      var available
-      if (window.screen.availWidth && window.screen.availHeight) {
-        if (this.options.detectScreenOrientation) {
-          available = (window.screen.availHeight > window.screen.availWidth) ? [window.screen.availHeight, window.screen.availWidth] : [window.screen.availWidth, window.screen.availHeight]
-        } else {
-          available = [window.screen.availHeight, window.screen.availWidth]
-        }
-      }
-      if (typeof available !== 'undefined') { // headless browsers
-        keys.addPreprocessedComponent({key: 'available_resolution', value: available})
-      }
       return keys
     },
     timezoneOffsetKey: function (keys) {
@@ -314,46 +646,16 @@
       }
       return keys
     },
-    indexedDbKey: function (keys) {
-      if (!this.options.excludeIndexedDB && this.hasIndexedDB()) {
-        keys.addPreprocessedComponent({key: 'indexed_db', value: 1})
-      }
-      return keys
-    },
-    addBehaviorKey: function (keys) {
-      // body might not be defined at this point or removed programmatically
-      if (!this.options.excludeAddBehavior && document.body && document.body.addBehavior) {
-        keys.addPreprocessedComponent({key: 'add_behavior', value: 1})
-      }
-      return keys
-    },
+
     openDatabaseKey: function (keys) {
       if (!this.options.excludeOpenDatabase && window.openDatabase) {
         keys.addPreprocessedComponent({key: 'open_database', value: 1})
       }
       return keys
     },
-    cpuClassKey: function (keys) {
-      if (!this.options.excludeCpuClass) {
-        keys.addPreprocessedComponent({key: 'cpu_class', value: this.getNavigatorCpuClass()})
-      }
-      return keys
-    },
     platformKey: function (keys) {
       if (!this.options.excludePlatform) {
         keys.addPreprocessedComponent({key: 'navigator_platform', value: this.getNavigatorPlatform()})
-      }
-      return keys
-    },
-    doNotTrackKey: function (keys) {
-      if (!this.options.excludeDoNotTrack) {
-        keys.addPreprocessedComponent({key: 'do_not_track', value: this.getDoNotTrack()})
-      }
-      return keys
-    },
-    canvasKey: function (keys) {
-      if (!this.options.excludeCanvas && this.isCanvasSupported()) {
-        keys.addPreprocessedComponent({key: 'canvas', value: this.getCanvasFp()})
       }
       return keys
     },
@@ -369,46 +671,11 @@
       }
       return keys
     },
-    adBlockKey: function (keys) {
-      if (!this.options.excludeAdBlock) {
-        keys.addPreprocessedComponent({key: 'adblock', value: this.getAdBlock()})
-      }
-      return keys
-    },
-    hasLiedLanguagesKey: function (keys) {
-      if (!this.options.excludeHasLiedLanguages) {
-        keys.addPreprocessedComponent({key: 'has_lied_languages', value: this.getHasLiedLanguages()})
-      }
-      return keys
-    },
-    hasLiedResolutionKey: function (keys) {
-      if (!this.options.excludeHasLiedResolution) {
-        keys.addPreprocessedComponent({key: 'has_lied_resolution', value: this.getHasLiedResolution()})
-      }
-      return keys
-    },
-    hasLiedOsKey: function (keys) {
-      if (!this.options.excludeHasLiedOs) {
-        keys.addPreprocessedComponent({key: 'has_lied_os', value: this.getHasLiedOs()})
-      }
-      return keys
-    },
-    hasLiedBrowserKey: function (keys) {
-      if (!this.options.excludeHasLiedBrowser) {
-        keys.addPreprocessedComponent({key: 'has_lied_browser', value: this.getHasLiedBrowser()})
-      }
-      return keys
-    },
-    fontsKey: function (keys, done) {
-      if (this.options.excludeJsFonts) {
-        return this.flashFontsKey(keys, done)
-      }
-      return this.jsFontsKey(keys, done)
-    },
+
     // flash fonts (will increase fingerprinting time 20X to ~ 130-150ms)
-    flashFontsKey: function (keys, done) {
-      if (this.options.excludeFlashFonts) {
-        return done(keys)
+    getFlashFonts: function (options, done) {
+      if (options.excludeFlashFonts) {
+        return done(this.EXCLUDED)
       }
       // we do flash if swfobject is loaded
       if (!this.hasSwfObjectLoaded()) {
@@ -417,16 +684,15 @@
       if (!this.hasMinFlashInstalled()) {
         return done(keys)
       }
-      if (typeof this.options.swfPath === 'undefined') {
-        return done(keys)
+      if (typeof options.swfPath === 'undefined') {
+        return done(this.EXCLUDED) // TODO:exluded isn't really correct here... raise error ? 
       }
       this.loadSwfAndDetectFonts(function (fonts) {
-        keys.addPreprocessedComponent({key: 'swf_fonts', value: fonts.join(';')})
-        done(keys)
+        done(fonts.join(';'))
       })
     },
     // kudos to http://www.lalit.org/lab/javascript-css-font-detect/
-    jsFontsKey: function (keys, done) {
+    getJsFonts: function (options, done) {
       var that = this
       // doing js fonts detection in a pseudo-async fashion
       return setTimeout(function () {
@@ -481,7 +747,7 @@
           'TypoUpright BT', 'Unicorn', 'Univers', 'Univers CE 55 Medium', 'Univers Condensed', 'Utsaah', 'Vagabond', 'Vani', 'Vijaya', 'Viner Hand ITC', 'VisualUI', 'Vivaldi', 'Vladimir Script', 'Vrinda', 'Westminster', 'WHITNEY', 'Wide Latin',
           'ZapfEllipt BT', 'ZapfHumnst BT', 'ZapfHumnst Dm BT', 'Zapfino', 'Zurich BlkEx BT', 'Zurich Ex BT', 'ZWAdobeF']
 
-        if (that.options.extendedJsFonts) {
+        if (options.extendedJsFonts) {
           fontList = fontList.concat(extendedFontList)
         }
 
@@ -615,11 +881,11 @@
         // remove spans from DOM
         h.removeChild(fontsDiv)
         h.removeChild(baseFontsDiv)
-
-        keys.addPreprocessedComponent({key: 'js_fonts', value: available})
-        done(keys)
+        done(available)
       }, 1)
     },
+    
+    
     pluginsKey: function (keys) {
       if (!this.options.excludePlugins) {
         if (this.isIE()) {
@@ -716,12 +982,7 @@
       }
       return keys
     },
-    hardwareConcurrencyKey: function (keys) {
-      if (!this.options.excludeHardwareConcurrency) {
-        keys.addPreprocessedComponent({key: 'hardware_concurrency', value: this.getHardwareConcurrency()})
-      }
-      return keys
-    },
+
     hasSessionStorage: function () {
       try {
         return !!window.sessionStorage
@@ -737,26 +998,6 @@
         return true // SecurityError when referencing it means it exists
       }
     },
-    hasIndexedDB: function () {
-      try {
-        return !!window.indexedDB
-      } catch (e) {
-        return true // SecurityError when referencing it means it exists
-      }
-    },
-    getHardwareConcurrency: function () {
-      if (navigator.hardwareConcurrency) {
-        return navigator.hardwareConcurrency
-      }
-      return 'unknown'
-    },
-    getNavigatorCpuClass: function () {
-      if (navigator.cpuClass) {
-        return navigator.cpuClass
-      } else {
-        return 'unknown'
-      }
-    },
     getNavigatorPlatform: function () {
       if (navigator.platform) {
         return navigator.platform
@@ -764,17 +1005,7 @@
         return 'unknown'
       }
     },
-    getDoNotTrack: function () {
-      if (navigator.doNotTrack) {
-        return navigator.doNotTrack
-      } else if (navigator.msDoNotTrack) {
-        return navigator.msDoNotTrack
-      } else if (window.doNotTrack) {
-        return window.doNotTrack
-      } else {
-        return 'unknown'
-      }
-    },
+
     // This is a crude and primitive touch screen detection.
     // It's not possible to currently reliably detect the  availability of a touch screen
     // with a JS, without actually subscribing to a touch event.
@@ -798,68 +1029,6 @@
       var touchStart = 'ontouchstart' in window
       return [maxTouchPoints, touchEvent, touchStart]
     },
-    // https://www.browserleaks.com/canvas#how-does-it-work
-    getCanvasFp: function () {
-      var result = []
-      // Very simple now, need to make it more complex (geo shapes etc)
-      var canvas = document.createElement('canvas')
-      canvas.width = 2000
-      canvas.height = 200
-      canvas.style.display = 'inline'
-      var ctx = canvas.getContext('2d')
-      // detect browser support of canvas winding
-      // http://blogs.adobe.com/webplatform/2013/01/30/winding-rules-in-canvas/
-      // https://github.com/Modernizr/Modernizr/blob/master/feature-detects/canvas/winding.js
-      ctx.rect(0, 0, 10, 10)
-      ctx.rect(2, 2, 6, 6)
-      result.push('canvas winding:' + ((ctx.isPointInPath(5, 5, 'evenodd') === false) ? 'yes' : 'no'))
-
-      ctx.textBaseline = 'alphabetic'
-      ctx.fillStyle = '#f60'
-      ctx.fillRect(125, 1, 62, 20)
-      ctx.fillStyle = '#069'
-      // https://github.com/Valve/fingerprintjs2/issues/66
-      if (this.options.dontUseFakeFontInCanvas) {
-        ctx.font = '11pt Arial'
-      } else {
-        ctx.font = '11pt no-real-font-123'
-      }
-      ctx.fillText('Cwm fjordbank glyphs vext quiz, \ud83d\ude03', 2, 15)
-      ctx.fillStyle = 'rgba(102, 204, 0, 0.2)'
-      ctx.font = '18pt Arial'
-      ctx.fillText('Cwm fjordbank glyphs vext quiz, \ud83d\ude03', 4, 45)
-
-      // canvas blending
-      // http://blogs.adobe.com/webplatform/2013/01/28/blending-features-in-canvas/
-      // http://jsfiddle.net/NDYV8/16/
-      ctx.globalCompositeOperation = 'multiply'
-      ctx.fillStyle = 'rgb(255,0,255)'
-      ctx.beginPath()
-      ctx.arc(50, 50, 50, 0, Math.PI * 2, true)
-      ctx.closePath()
-      ctx.fill()
-      ctx.fillStyle = 'rgb(0,255,255)'
-      ctx.beginPath()
-      ctx.arc(100, 50, 50, 0, Math.PI * 2, true)
-      ctx.closePath()
-      ctx.fill()
-      ctx.fillStyle = 'rgb(255,255,0)'
-      ctx.beginPath()
-      ctx.arc(75, 100, 50, 0, Math.PI * 2, true)
-      ctx.closePath()
-      ctx.fill()
-      ctx.fillStyle = 'rgb(255,0,255)'
-      // canvas winding
-      // http://blogs.adobe.com/webplatform/2013/01/30/winding-rules-in-canvas/
-      // http://jsfiddle.net/NDYV8/19/
-      ctx.arc(75, 75, 75, 0, Math.PI * 2, true)
-      ctx.arc(75, 75, 25, 0, Math.PI * 2, true)
-      ctx.fill('evenodd')
-
-      if (canvas.toDataURL) { result.push('canvas fp:' + canvas.toDataURL()) }
-      return result.join('~')
-    },
-
     getWebglFp: function () {
       var gl
       var fa2s = function (fa) {
@@ -985,163 +1154,6 @@
       } catch (e) {
         return null
       }
-    },
-    getAdBlock: function () {
-      var ads = document.createElement('div')
-      ads.innerHTML = '&nbsp;'
-      ads.className = 'adsbox'
-      var result = false
-      try {
-        // body may not exist, that's why we need try/catch
-        document.body.appendChild(ads)
-        result = document.getElementsByClassName('adsbox')[0].offsetHeight === 0
-        document.body.removeChild(ads)
-      } catch (e) {
-        result = false
-      }
-      return result
-    },
-    getHasLiedLanguages: function () {
-      // We check if navigator.language is equal to the first language of navigator.languages
-      if (typeof navigator.languages !== 'undefined') {
-        try {
-          var firstLanguages = navigator.languages[0].substr(0, 2)
-          if (firstLanguages !== navigator.language.substr(0, 2)) {
-            return true
-          }
-        } catch (err) {
-          return true
-        }
-      }
-      return false
-    },
-    getHasLiedResolution: function () {
-      if (window.screen.width < window.screen.availWidth) {
-        return true
-      }
-      if (window.screen.height < window.screen.availHeight) {
-        return true
-      }
-      return false
-    },
-    getHasLiedOs: function () {
-      var userAgent = navigator.userAgent.toLowerCase()
-      var oscpu = navigator.oscpu
-      var platform = navigator.platform.toLowerCase()
-      var os
-      // We extract the OS from the user agent (respect the order of the if else if statement)
-      if (userAgent.indexOf('windows phone') >= 0) {
-        os = 'Windows Phone'
-      } else if (userAgent.indexOf('win') >= 0) {
-        os = 'Windows'
-      } else if (userAgent.indexOf('android') >= 0) {
-        os = 'Android'
-      } else if (userAgent.indexOf('linux') >= 0) {
-        os = 'Linux'
-      } else if (userAgent.indexOf('iphone') >= 0 || userAgent.indexOf('ipad') >= 0) {
-        os = 'iOS'
-      } else if (userAgent.indexOf('mac') >= 0) {
-        os = 'Mac'
-      } else {
-        os = 'Other'
-      }
-      // We detect if the person uses a mobile device
-      var mobileDevice
-      if (('ontouchstart' in window) ||
-           (navigator.maxTouchPoints > 0) ||
-           (navigator.msMaxTouchPoints > 0)) {
-        mobileDevice = true
-      } else {
-        mobileDevice = false
-      }
-
-      if (mobileDevice && os !== 'Windows Phone' && os !== 'Android' && os !== 'iOS' && os !== 'Other') {
-        return true
-      }
-
-      // We compare oscpu with the OS extracted from the UA
-      if (typeof oscpu !== 'undefined') {
-        oscpu = oscpu.toLowerCase()
-        if (oscpu.indexOf('win') >= 0 && os !== 'Windows' && os !== 'Windows Phone') {
-          return true
-        } else if (oscpu.indexOf('linux') >= 0 && os !== 'Linux' && os !== 'Android') {
-          return true
-        } else if (oscpu.indexOf('mac') >= 0 && os !== 'Mac' && os !== 'iOS') {
-          return true
-        } else if ((oscpu.indexOf('win') === -1 && oscpu.indexOf('linux') === -1 && oscpu.indexOf('mac') === -1) !== (os === 'Other')) {
-          return true
-        }
-      }
-
-      // We compare platform with the OS extracted from the UA
-      if (platform.indexOf('win') >= 0 && os !== 'Windows' && os !== 'Windows Phone') {
-        return true
-      } else if ((platform.indexOf('linux') >= 0 || platform.indexOf('android') >= 0 || platform.indexOf('pike') >= 0) && os !== 'Linux' && os !== 'Android') {
-        return true
-      } else if ((platform.indexOf('mac') >= 0 || platform.indexOf('ipad') >= 0 || platform.indexOf('ipod') >= 0 || platform.indexOf('iphone') >= 0) && os !== 'Mac' && os !== 'iOS') {
-        return true
-      } else if ((platform.indexOf('win') === -1 && platform.indexOf('linux') === -1 && platform.indexOf('mac') === -1) !== (os === 'Other')) {
-        return true
-      }
-
-      if (typeof navigator.plugins === 'undefined' && os !== 'Windows' && os !== 'Windows Phone') {
-        // We are are in the case where the person uses ie, therefore we can infer that it's windows
-        return true
-      }
-
-      return false
-    },
-    getHasLiedBrowser: function () {
-      var userAgent = navigator.userAgent.toLowerCase()
-      var productSub = navigator.productSub
-
-      // we extract the browser from the user agent (respect the order of the tests)
-      var browser
-      if (userAgent.indexOf('firefox') >= 0) {
-        browser = 'Firefox'
-      } else if (userAgent.indexOf('opera') >= 0 || userAgent.indexOf('opr') >= 0) {
-        browser = 'Opera'
-      } else if (userAgent.indexOf('chrome') >= 0) {
-        browser = 'Chrome'
-      } else if (userAgent.indexOf('safari') >= 0) {
-        browser = 'Safari'
-      } else if (userAgent.indexOf('trident') >= 0) {
-        browser = 'Internet Explorer'
-      } else {
-        browser = 'Other'
-      }
-
-      if ((browser === 'Chrome' || browser === 'Safari' || browser === 'Opera') && productSub !== '20030107') {
-        return true
-      }
-
-      // eslint-disable-next-line no-eval
-      var tempRes = eval.toString().length
-      if (tempRes === 37 && browser !== 'Safari' && browser !== 'Firefox' && browser !== 'Other') {
-        return true
-      } else if (tempRes === 39 && browser !== 'Internet Explorer' && browser !== 'Other') {
-        return true
-      } else if (tempRes === 33 && browser !== 'Chrome' && browser !== 'Opera' && browser !== 'Other') {
-        return true
-      }
-
-      // We create an error to see how it is handled
-      var errFirefox
-      try {
-        // eslint-disable-next-line no-throw-literal
-        throw 'a'
-      } catch (err) {
-        try {
-          err.toSource()
-          errFirefox = true
-        } catch (errOfErr) {
-          errFirefox = false
-        }
-      }
-      if (errFirefox && browser !== 'Firefox' && browser !== 'Other') {
-        return true
-      }
-      return false
     },
     isCanvasSupported: function () {
       var elem = document.createElement('canvas')
